@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="Browser-based magnetic field scanner using the phone magnetometer.">
+  <title>Magnetic Field Scanner</title>
+  <style>
+    :root{
+      --bg:#07111f; --card:#0d1a2c; --card2:#101f34; --line:#20334d;
+      --text:#eef6ff; --muted:#9bb0c9; --accent:#38e6a4; --warn:#ffc857; --danger:#ff667d;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(circle at 50% -10%,#17304c 0,#07111f 45%);
+      color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    .wrap{width:min(760px,100%);margin:auto;padding:18px 14px 36px}
+    .hero{text-align:center;padding:10px 0 14px}
+    .logo{font-size:42px}
+    h1{font-size:28px;margin:4px 0 5px}
+    .sub{margin:0;color:var(--muted);font-size:14px}
+    .card{background:rgba(13,26,44,.94);border:1px solid var(--line);border-radius:20px;padding:17px;margin:12px 0;box-shadow:0 10px 30px rgba(0,0,0,.16)}
+    .main{text-align:center}
+    .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.12em}
+    .value{font-size:54px;font-weight:850;line-height:1.05;margin-top:6px}
+    .unit{color:var(--muted);font-size:15px}
+    .status{font-weight:800;margin:10px 0 12px}
+    .ok{color:var(--accent)} .warn{color:var(--warn)} .danger{color:var(--danger)}
+    .meter{height:15px;border-radius:99px;background:#182a42;overflow:hidden}
+    .bar{height:100%;width:0;background:var(--accent);transition:width .12s,background .12s}
+    .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:13px}
+    button{border:0;border-radius:13px;padding:14px 10px;font-size:16px;font-weight:800;background:var(--accent);color:#03120c}
+    button.secondary{background:#1a2b43;color:var(--text)}
+    button.danger{background:var(--danger);color:#21060c}
+    button:disabled{opacity:.5}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .stat{background:#0a1728;border:1px solid #1b2d45;border-radius:14px;padding:12px}
+    .stat .label{font-size:10px}.num{font-size:18px;font-weight:800;margin-top:4px}
+    canvas{width:100%;height:240px;background:#091526;border-radius:14px;display:block}
+    .notice{font-size:13px;line-height:1.55;color:var(--muted)}
+    .notice strong{color:var(--text)}
+    .diag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.7;color:#b9cbe0}
+    .pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#16283f;color:#b9cbe0;margin:2px}
+    .footer{text-align:center;color:#71859e;font-size:11px;margin-top:15px}
+    @media(max-width:430px){.value{font-size:46px}.btns{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <header class="hero">
+    <div class="logo">🧲</div>
+    <h1>Magnetic Field Scanner</h1>
+    <p class="sub">Web-based magnetometer tester • no app installation</p>
+  </header>
+
+  <section class="card main">
+    <div class="label">Total magnetic field</div>
+    <div class="value" id="value">—</div>
+    <div class="unit">µT (microtesla)</div>
+    <div id="status" class="status">Ready — press Start</div>
+    <div class="meter"><div id="bar" class="bar"></div></div>
+    <div class="btns">
+      <button id="start">▶ Start Scanner</button>
+      <button id="reset" class="secondary">↺ Reset Baseline</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="grid">
+      <div class="stat"><div class="label">Baseline</div><div id="baseline" class="num">—</div></div>
+      <div class="stat"><div class="label">Change</div><div id="change" class="num">—</div></div>
+      <div class="stat"><div class="label">Peak Change</div><div id="peak" class="num">—</div></div>
+      <div class="stat"><div class="label">Samples</div><div id="samples" class="num">0</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="label" style="margin-bottom:10px">Live graph</div>
+    <canvas id="chart" width="1000" height="420"></canvas>
+  </section>
+
+  <section class="card">
+    <div class="label" style="margin-bottom:8px">Sensor diagnostics</div>
+    <div id="diag" class="diag">Checking browser support…</div>
+  </section>
+
+  <section class="card notice">
+    <strong>How to test:</strong><br>
+    1. Open this site over HTTPS.<br>
+    2. Keep the phone still and press <strong>Start Scanner</strong>.<br>
+    3. Wait a few seconds for the baseline.<br>
+    4. Slowly move the phone near a magnet or iron/steel object and watch the graph.<br><br>
+    <strong>Important:</strong> this measures magnetic-field changes. It does <strong>not</strong> identify gold, silver, copper, or any particular metal, and it cannot reliably tell underground depth.
+  </section>
+
+  <div class="footer">Magnetic Field Scanner • Browser Sensor Test</div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = id => document.getElementById(id);
+  const valueEl=$("value"), statusEl=$("status"), barEl=$("bar");
+  const baselineEl=$("baseline"), changeEl=$("change"), peakEl=$("peak"), samplesEl=$("samples");
+  const startBtn=$("start"), resetBtn=$("reset"), diagEl=$("diag");
+  const canvas=$("chart"), ctx=canvas.getContext("2d");
+
+  let sensor=null, running=false, baseline=null, peak=0, samples=0;
+  let history=[], lastBeep=0, audioCtx=null;
+
+  const fmt = n => Number.isFinite(n) ? n.toFixed(1) : "—";
+  const magnitude = (x,y,z) => Math.sqrt(x*x+y*y+z*z);
+
+  function setStatus(text, cls="") {
+    statusEl.textContent=text;
+    statusEl.className="status "+cls;
+  }
+
+  function draw() {
+    const w=canvas.width, h=canvas.height;
+    ctx.clearRect(0,0,w,h);
+    ctx.strokeStyle="#1c2c43"; ctx.lineWidth=1;
+    for(let i=1;i<5;i++){
+      const y=i*h/5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+    }
+    if(history.length<2) return;
+    let lo=Math.min(...history), hi=Math.max(...history);
+    const pad=Math.max(2,(hi-lo)*.12); lo-=pad; hi+=pad;
+    ctx.strokeStyle="#38e6a4"; ctx.lineWidth=4; ctx.beginPath();
+    history.forEach((v,i)=>{
+      const x=i*w/(history.length-1);
+      const y=h-(v-lo)/(hi-lo||1)*h;
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+  }
+
+  function beep(strength) {
+    const now=performance.now();
+    if(now-lastBeep<500 || !audioCtx) return;
+    lastBeep=now;
+    try {
+      if(audioCtx.state==="suspended") audioCtx.resume();
+      const osc=audioCtx.createOscillator();
+      const gain=audioCtx.createGain();
+      osc.type="sine";
+      osc.frequency.value=Math.min(1300,520+strength*40);
+      gain.gain.value=.025;
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime+.07);
+    } catch(e) {}
+  }
+
+  function update(v) {
+    if(!Number.isFinite(v)) return;
+    samples++;
+    if(baseline===null) {
+      baseline=v;
+      baselineEl.textContent=fmt(v)+" µT";
+    }
+    const delta=Math.abs(v-baseline);
+    peak=Math.max(peak,delta);
+    valueEl.textContent=fmt(v);
+    changeEl.textContent=fmt(delta)+" µT";
+    peakEl.textContent=fmt(peak)+" µT";
+    samplesEl.textContent=String(samples);
+
+    history.push(v);
+    if(history.length>140) history.shift();
+    draw();
+
+    const level=Math.min(100, delta*5);
+    barEl.style.width=level+"%";
+
+    if(delta<2) {
+      barEl.style.background="var(--accent)";
+      setStatus("🟢 Stable / near baseline","ok");
+    } else if(delta<8) {
+      barEl.style.background="var(--warn)";
+      setStatus("🟡 Magnetic field changed","warn");
+      beep(delta);
+    } else {
+      barEl.style.background="var(--danger)";
+      setStatus("🔴 Strong magnetic change","danger");
+      beep(delta);
+    }
+  }
+
+  function resetBaseline() {
+    baseline=null; peak=0; samples=0; history=[];
+    baselineEl.textContent="—"; changeEl.textContent="—"; peakEl.textContent="—"; samplesEl.textContent="0";
+    valueEl.textContent="—"; barEl.style.width="0%"; barEl.style.background="var(--accent)";
+    draw();
+    if(running) setStatus("Hold still — collecting new baseline…");
+  }
+
+  function diagnostics() {
+    const secure=window.isSecureContext ? "YES" : "NO";
+    const mag="Magnetometer" in window ? "AVAILABLE" : "NOT EXPOSED";
+    diagEl.innerHTML =
+      `<span class="pill">HTTPS/Secure: ${secure}</span>`+
+      `<span class="pill">Magnetometer API: ${mag}</span>`+
+      `<span class="pill">Browser: ${navigator.userAgent.includes("Chrome") ? "Chrome detected" : "Other browser"}</span>`;
+  }
+
+  async function start() {
+    if(running) return;
+    resetBaseline();
+
+    if(!window.isSecureContext) {
+      setStatus("❌ HTTPS is required","danger");
+      alert("Open the deployed Render HTTPS URL, not a local content:// file.");
+      return;
+    }
+
+    if(!("Magnetometer" in window)) {
+      setStatus("❌ Magnetometer API unavailable","danger");
+      alert("This browser is not exposing the Magnetometer API. Try an up-to-date Chrome on Android and make sure sensor access is allowed.");
+      return;
+    }
+
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if(audioCtx.state==="suspended") await audioCtx.resume();
+
+      sensor = new Magnetometer({frequency:10});
+      sensor.addEventListener("reading", () => {
+        update(magnitude(sensor.x, sensor.y, sensor.z));
+      });
+      sensor.addEventListener("error", e => {
+        setStatus("❌ Sensor error: "+(e.error?.name || "unknown"),"danger");
+        stop();
+      });
+      sensor.start();
+
+      running=true;
+      startBtn.textContent="■ Stop Scanner";
+      startBtn.classList.add("danger");
+      setStatus("🔵 Scanning… hold phone still for baseline");
+    } catch(e) {
+      setStatus("❌ "+(e.name || "Could not start sensor"),"danger");
+      alert("Sensor could not start: "+(e.message || e.name || "unknown error"));
+    }
+  }
+
+  function stop() {
+    try { if(sensor) sensor.stop(); } catch(e) {}
+    sensor=null; running=false;
+    startBtn.textContent="▶ Start Scanner";
+    startBtn.classList.remove("danger");
+    if(baseline!==null) setStatus("Stopped");
+  }
+
+  startBtn.addEventListener("click", () => running ? stop() : start());
+  resetBtn.addEventListener("click", resetBaseline);
+  diagnostics();
+  draw();
+})();
+</script>
+</body>
+</html>

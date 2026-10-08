@@ -1,0 +1,13 @@
+services:
+  - type: web
+    runtime: static
+    name: magnetic-field-scanner
+    buildCommand: ""
+    staticPublishPath: .
+    headers:
+      - path: /*
+        name: Permissions-Policy
+        value: "magnetometer=(self)"
+      - path: /*
+        name: Referrer-Policy
+        value: "strict-origin-when-cross-origin"
